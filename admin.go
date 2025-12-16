@@ -23,7 +23,15 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) metricsResetHandler(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, 403, "Not allowed outside of dev environment")
+		return
+	}
 	cfg.fileserverHits.Store(0)
+	_, err := cfg.dbQueries.ResetUsers(r.Context())
+	if err != nil {
+		log.Fatal("Failed to reset users")
+	}
 	fmt.Println("resetting")
 	w.WriteHeader(200)
 }

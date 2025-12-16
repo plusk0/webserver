@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/plusk0/webserver/internal/database"
@@ -15,6 +17,14 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
+}
+
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func main() {
@@ -30,14 +40,17 @@ func main() {
 		log.Fatal("Failed to open DB")
 	}
 	apiConf.dbQueries = database.New(db)
+	apiConf.platform = os.Getenv("PLATFORM")
 
 	port := ":8080"
 
 	mux := http.NewServeMux()
 	fileServer := http.FileServer(http.Dir("."))
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthHandlerFunc))
-	mux.Handle("POST /api/validate_chirp", http.HandlerFunc(validateHandlerFunc))
-	mux.Handle("POST /api/users", http.HandlerFunc(usersHandlerFunc))
+	mux.Handle("POST /api/chirps", http.HandlerFunc(apiConf.validateHandlerFunc))
+	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConf.getChirpsHandlerFunc))
+
+	mux.Handle("POST /api/users", http.HandlerFunc(apiConf.usersHandlerFunc))
 
 	mux.Handle("/app/", http.StripPrefix("/app", apiConf.middlewareMetricsInc(fileServer)))
 

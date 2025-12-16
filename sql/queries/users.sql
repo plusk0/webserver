@@ -7,3 +7,9 @@ VALUES (
     $1
 )
 RETURNING *;
+
+-- name: GetUser :one
+SELECT * FROM users WHERE $1 = email;
+
+-- name: ResetUsers :many
+DELETE FROM users RETURNING *;
