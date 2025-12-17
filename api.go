@@ -7,34 +7,67 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/plusk0/webserver/internal/auth"
 	"github.com/plusk0/webserver/internal/database"
 )
 
 func (conf *apiConfig) usersHandlerFunc(w http.ResponseWriter, r *http.Request) {
-	data, err := io.ReadAll(r.Body)
+	usr, err := getUsrReq(r)
 	if err != nil {
-		log.Fatal("Failed to read body")
+		respondWithError(w, 404, "Failed")
 	}
-	defer r.Body.Close()
-	var usr User
-	err = json.Unmarshal(data, &usr)
+	hash, err := auth.HashPassword(usr.Password)
 	if err != nil {
-		log.Fatalf("Failed to parse email: %v", err)
+		respondWithError(w, 404, "Failed")
 	}
-
-	dbUsr, err := conf.dbQueries.CreateUser(r.Context(), string(usr.Email))
+	params := database.CreateUserParams{usr.Email, hash}
+	dbUsr, err := conf.dbQueries.CreateUser(r.Context(), params)
 	if err != nil {
 		log.Fatal("Failed to create User")
 	}
-	usr.CreatedAt = dbUsr.CreatedAt
-	usr.UpdatedAt = dbUsr.UpdatedAt
-	usr.ID = dbUsr.ID
-	usr.Email = dbUsr.Email
+	respondWithJSON(w, 201, dbUserToSafeJSON(dbUsr))
+}
 
-	respondWithJSON(w, 201, usr)
+func (conf *apiConfig) loginHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	usr, err := getUsrReq(r)
+	if err != nil {
+		respondWithError(w, 401, "invalid Username or Password")
+		return
+	}
+	user, err := conf.dbQueries.GetUser(r.Context(), usr.Email)
+	if err != nil {
+		respondWithError(w, 401, "invalid Username or Password")
+		return
+	}
+	valid, err := auth.CheckPasswordHash(usr.Password, user.Password)
+
+	if !valid {
+		respondWithError(w, 401, "invalid Username or Password")
+	}
+	if err != nil {
+		log.Fatalf("Failed to check Login credentials: %v", err)
+	}
+	respondWithJSON(w, 200, dbUserToSafeJSON(user))
+}
+
+func dbUserToSafeJSON(db database.User) User {
+	return User{db.ID, db.CreatedAt, db.UpdatedAt, db.Email, ""}
+}
+
+func getUsrReq(r *http.Request) (usrReq, error) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		return usrReq{}, fmt.Errorf("failed to read body: %v", err)
+	}
+	defer r.Body.Close()
+	var usr usrReq
+	err = json.Unmarshal(data, &usr)
+	if err != nil {
+		return usrReq{}, fmt.Errorf("failed to parse email: %v", err)
+	}
+	return usr, nil
 }
 
 func healthHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -44,19 +77,6 @@ func healthHandlerFunc(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 	w.WriteHeader(200)
-}
-
-type Chirp struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Body      string    `json:"body"`
-	UserID    uuid.UUID `json:"user_id"`
-}
-
-type chirpReq struct {
-	Body   string    `json:"body"`
-	UserID uuid.UUID `json:"user_id"`
 }
 
 func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -95,14 +115,7 @@ func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Reques
 		respondWithError(w, 400, "Failed to insert Chirp")
 		return
 	}
-	var jsonChirp Chirp
-	jsonChirp.ID = insertedChirp.ID
-	jsonChirp.CreatedAt = insertedChirp.CreatedAt
-	jsonChirp.UpdatedAt = insertedChirp.UpdatedAt
-	jsonChirp.Body = insertedChirp.Body
-	jsonChirp.UserID = insertedChirp.UserID
-	fmt.Println(insertedChirp)
-	respondWithJSON(w, 201, jsonChirp)
+	respondWithJSON(w, 201, dbChirpToJSON(insertedChirp))
 }
 
 func (conf *apiConfig) getChirpsHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -118,9 +131,20 @@ func (conf *apiConfig) getChirpsHandlerFunc(w http.ResponseWriter, r *http.Reque
 	respondWithJSON(w, 200, jsonChirps)
 }
 
+func (conf *apiConfig) getChirpHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 404, "Failed to parse ChirpID")
+	}
+	chirp, err := conf.dbQueries.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "ChirpNotFound")
+	}
+	respondWithJSON(w, 200, dbChirpToJSON(chirp))
+}
+
 func dbChirpToJSON(db database.Chirp) Chirp {
-	resp := Chirp{db.ID, db.CreatedAt, db.UpdatedAt, db.Body, db.UserID}
-	return resp
+	return Chirp{db.ID, db.CreatedAt, db.UpdatedAt, db.Body, db.UserID}
 }
 
 func writeJSONResponse(w http.ResponseWriter, code int, payload any) error {

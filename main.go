@@ -5,27 +5,11 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync/atomic"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 	"github.com/plusk0/webserver/internal/database"
 )
-
-type apiConfig struct {
-	fileserverHits atomic.Int32
-	dbQueries      *database.Queries
-	platform       string
-}
-
-type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-}
 
 func main() {
 	err := godotenv.Load()
@@ -49,8 +33,10 @@ func main() {
 	mux.Handle("GET /api/healthz", http.HandlerFunc(healthHandlerFunc))
 	mux.Handle("POST /api/chirps", http.HandlerFunc(apiConf.validateHandlerFunc))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConf.getChirpsHandlerFunc))
+	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(apiConf.getChirpHandlerFunc))
 
 	mux.Handle("POST /api/users", http.HandlerFunc(apiConf.usersHandlerFunc))
+	mux.Handle("POST /api/login", http.HandlerFunc(apiConf.loginHandlerFunc))
 
 	mux.Handle("/app/", http.StripPrefix("/app", apiConf.middlewareMetricsInc(fileServer)))
 

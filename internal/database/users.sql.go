@@ -10,30 +10,37 @@ import (
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, created_at, updated_at, email)
+INSERT INTO users (id, created_at, updated_at, email, password)
 VALUES (
     gen_random_uuid(),
     NOW(),
     NOW(),
-    $1
+    $1,
+    $2
 )
-RETURNING id, created_at, updated_at, email
+RETURNING id, created_at, updated_at, email, password
 `
 
-func (q *Queries) CreateUser(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, email)
+type CreateUserParams struct {
+	Email    string
+	Password string
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.Password)
 	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
+		&i.Password,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, created_at, updated_at, email FROM users WHERE $1 = email
+SELECT id, created_at, updated_at, email, password FROM users WHERE $1 = email
 `
 
 func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
@@ -44,12 +51,13 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
+		&i.Password,
 	)
 	return i, err
 }
 
 const resetUsers = `-- name: ResetUsers :many
-DELETE FROM users RETURNING id, created_at, updated_at, email
+DELETE FROM users RETURNING id, created_at, updated_at, email, password
 `
 
 func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
@@ -66,6 +74,7 @@ func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Email,
+			&i.Password,
 		); err != nil {
 			return nil, err
 		}
