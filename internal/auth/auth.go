@@ -92,3 +92,13 @@ func GetBearerToken(headers http.Header) (string, error) {
 	cleaned = strings.TrimLeft(cleaned, " ")
 	return cleaned, nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	auth := headers.Get("Authorization")
+	if auth == "" {
+		return "", errors.New("no auth found")
+	}
+	cleaned := strings.TrimLeft(auth, "ApiKey")
+	cleaned = strings.TrimLeft(cleaned, " ")
+	return cleaned, nil
+}

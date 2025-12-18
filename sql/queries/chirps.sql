@@ -17,3 +17,6 @@ SELECT * FROM chirps WHERE id = $1;
 
 -- name: ResetChirps :many
 DELETE FROM chirps RETURNING *;
+
+-- name: DeleteChirp :one
+DELETE FROM chirps WHERE id = $1 RETURNING *;

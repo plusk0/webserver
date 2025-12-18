@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +42,35 @@ func (conf *apiConfig) usersHandlerFunc(w http.ResponseWriter, r *http.Request) 
 	}
 	user := dbUserToSafeJSON(dbUsr, tk, rTK)
 	respondWithJSON(w, 201, user)
+}
+
+func (conf *apiConfig) userUpdateHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	tk, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Header")
+	}
+	validUser, err := auth.ValidateJWT(tk, conf.JWTKey)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	usr, err := getUsrReq(r)
+	if err != nil {
+		respondWithError(w, 401, "Failed")
+		return
+	}
+	hash, err := auth.HashPassword(usr.Password)
+	if err != nil {
+		respondWithError(w, 401, "Failed")
+		return
+	}
+	params := database.UpdateUserParams{validUser, usr.Email, hash}
+	user, err := conf.dbQueries.UpdateUser(r.Context(), params)
+	if err != nil {
+		respondWithError(w, 401, "Failed")
+		return
+	}
+	respondWithJSON(w, 200, dbUserToUserJSON(user))
 }
 
 func (conf *apiConfig) loginHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +126,43 @@ func (conf *apiConfig) refreshHandlerFunc(w http.ResponseWriter, r *http.Request
 	respondWithJSON(w, 200, tokenMap)
 }
 
+func (conf *apiConfig) revokeHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	tk, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Fatal("Failed to get header Token")
+	}
+	_, err = conf.dbQueries.RevokeToken(r.Context(), tk)
+	if err != nil {
+		respondWithError(w, 400, "Failed to revoke Token")
+	}
+
+	respondWithJSON(w, 204, "")
+}
+
 func dbUserToSafeJSON(db database.User, tk string, rTK string) User {
-	return User{db.ID, db.CreatedAt, db.UpdatedAt, db.Email, "", tk, rTK}
+	return User{
+		db.ID,
+		db.CreatedAt,
+		db.UpdatedAt,
+		db.Email,
+		"",
+		tk,
+		rTK,
+		db.IsChirpyRed,
+	}
+}
+
+func dbUserToUserJSON(db database.UpdateUserRow) User {
+	return User{
+		db.ID,
+		db.CreatedAt,
+		db.UpdatedAt,
+		db.Email,
+		"",
+		"",
+		"",
+		db.IsChirpyRed,
+	}
 }
 
 func getUsrReq(r *http.Request) (usrReq, error) {
@@ -128,7 +193,8 @@ func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Reques
 	var req chirpReq
 	tk, err := auth.GetBearerToken(r.Header)
 	if err != nil {
-		log.Fatal("Failed to get header Token")
+		respondWithError(w, 401, "Unauthorized")
+		return
 	}
 	validUser, err := auth.ValidateJWT(tk, conf.JWTKey)
 	if err != nil {
@@ -166,21 +232,49 @@ func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Reques
 	args := database.CreateChirpParams{payload, req.UserID}
 	insertedChirp, err := conf.dbQueries.CreateChirp(r.Context(), args)
 	if err != nil {
-		respondWithError(w, 400, "Unauthorized")
+		respondWithError(w, 401, "Unauthorized")
 		return
 	}
 	respondWithJSON(w, 201, dbChirpToJSON(insertedChirp))
 }
 
 func (conf *apiConfig) getChirpsHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	f := r.URL.Query().Get("author_id")
+	var id uuid.UUID
+	var filtering bool
+	var err error
+	if f != "" {
+		filtering = true
+		id, err = uuid.Parse(f)
+		if err != nil {
+			filtering = false
+		}
+	}
+
+	s := r.URL.Query().Get("sort")
+	sortAscending := s != "desc"
+
 	chirps, err := conf.dbQueries.GetChirps(r.Context())
 	if err != nil {
 		respondWithError(w, 400, "Failed to get Chirps")
 	}
 	var jsonChirps []Chirp
 	for _, v := range chirps {
+		if filtering {
+			if v.UserID != id {
+				continue
+			}
+		}
 		jsonChirp := dbChirpToJSON(v)
 		jsonChirps = append(jsonChirps, jsonChirp)
+
+		sort.Slice(jsonChirps, func(i, j int) bool {
+			if sortAscending {
+				return jsonChirps[i].CreatedAt.Before(jsonChirps[j].CreatedAt)
+			}
+			return jsonChirps[i].CreatedAt.After(jsonChirps[j].CreatedAt)
+		})
+
 	}
 	respondWithJSON(w, 200, jsonChirps)
 }
@@ -189,16 +283,86 @@ func (conf *apiConfig) getChirpHandlerFunc(w http.ResponseWriter, r *http.Reques
 	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		respondWithError(w, 404, "Failed to parse ChirpID")
+		return
 	}
 	chirp, err := conf.dbQueries.GetChirp(r.Context(), chirpID)
 	if err != nil {
 		respondWithError(w, 404, "ChirpNotFound")
+		return
 	}
 	respondWithJSON(w, 200, dbChirpToJSON(chirp))
 }
 
+func (conf *apiConfig) deleteChirpHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	tk, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Token not found")
+		return
+	}
+	validUser, err := auth.ValidateJWT(tk, conf.JWTKey)
+	if err != nil {
+		respondWithError(w, 403, "User not Authorized")
+		return
+	}
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 404, "Failed to parse ChirpID")
+		return
+	}
+	chirp, err := conf.dbQueries.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "ChirpNotFound")
+		return
+	}
+	if chirp.UserID != validUser {
+		respondWithError(w, 403, "User not Authorized")
+		return
+	}
+	_, err = conf.dbQueries.DeleteChirp(r.Context(), chirp.ID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	if err == nil {
+		w.WriteHeader(204)
+	}
+}
+
 func dbChirpToJSON(db database.Chirp) Chirp {
 	return Chirp{db.ID, db.CreatedAt, db.UpdatedAt, db.Body, db.UserID}
+}
+
+func (conf *apiConfig) webhookHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	tk, err := auth.GetAPIKey(r.Header)
+	if err != nil || tk != conf.PolkaKey {
+		respondWithError(w, 401, "Token not found")
+		return
+	}
+
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(204)
+		return
+	}
+	defer r.Body.Close()
+
+	var req WebHook
+	err = json.Unmarshal(data, &req)
+	if err != nil || req.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	}
+	uid, err := uuid.Parse(req.Data.Data)
+	if err != nil {
+		w.WriteHeader(204)
+		return
+	}
+	_, err = conf.dbQueries.UpgradeUser(r.Context(), uid)
+	if err != nil {
+		w.WriteHeader(404)
+		fmt.Println("Failed to upgrade User")
+	}
+	w.WriteHeader(204)
 }
 
 func writeJSONResponse(w http.ResponseWriter, code int, payload any) error {
@@ -214,12 +378,6 @@ func writeJSONResponse(w http.ResponseWriter, code int, payload any) error {
 func respondWithError(w http.ResponseWriter, code int, text string) {
 	if err := writeJSONResponse(w, code, map[string]string{"error": text}); err != nil {
 		fmt.Printf("Failed at respondWithError: %v", err)
-	}
-}
-
-func respondWithNamedJSON(w http.ResponseWriter, code int, name string, payload any) {
-	if err := writeJSONResponse(w, code, map[string]any{name: payload}); err != nil {
-		fmt.Printf("Failed at respondWithNamedJSON: %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ type apiConfig struct {
 	dbQueries      *database.Queries
 	platform       string
 	JWTKey         string
+	PolkaKey       string
 }
 
 type Chirp struct {
@@ -32,7 +33,6 @@ type chirpReq struct {
 type usrReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	Expiry   int    `json:"expires_in_seconds"`
 }
 
 type User struct {
@@ -43,6 +43,7 @@ type User struct {
 	password     string
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
+	IsChirpyRed  bool   `json:"is_chirpy_red"`
 }
 
 type RefreshToken struct {
@@ -52,4 +53,13 @@ type RefreshToken struct {
 	UserID    uuid.UUID
 	ExpiresAt time.Time
 	RevokedAt sql.NullTime
+}
+
+type WebHook struct {
+	Event string      `json:"event"`
+	Data  WebhookData `json:"data"`
+}
+
+type WebhookData struct {
+	Data string `json:"user_id"`
 }

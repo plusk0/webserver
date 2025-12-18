@@ -7,18 +7,22 @@ package database
 
 import (
 	"context"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 const createUser = `-- name: CreateUser :one
-INSERT INTO users (id, created_at, updated_at, email, password)
+INSERT INTO users (id, created_at, updated_at, email, password, is_chirpy_red)
 VALUES (
     gen_random_uuid(),
     NOW(),
     NOW(),
     $1,
-    $2
+    $2,
+    false
 )
-RETURNING id, created_at, updated_at, email, password
+RETURNING id, created_at, updated_at, email, password, is_chirpy_red
 `
 
 type CreateUserParams struct {
@@ -35,12 +39,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Email,
 		&i.Password,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, created_at, updated_at, email, password FROM users WHERE $1 = email
+SELECT id, created_at, updated_at, email, password, is_chirpy_red FROM users WHERE $1 = email
 `
 
 func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
@@ -52,12 +57,13 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 		&i.UpdatedAt,
 		&i.Email,
 		&i.Password,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
 
 const getUsers = `-- name: GetUsers :many
-SELECT id, created_at, updated_at, email, password FROM users
+SELECT id, created_at, updated_at, email, password, is_chirpy_red FROM users
 `
 
 func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
@@ -75,6 +81,7 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Email,
 			&i.Password,
+			&i.IsChirpyRed,
 		); err != nil {
 			return nil, err
 		}
@@ -90,7 +97,7 @@ func (q *Queries) GetUsers(ctx context.Context) ([]User, error) {
 }
 
 const resetUsers = `-- name: ResetUsers :many
-DELETE FROM users RETURNING id, created_at, updated_at, email, password
+DELETE FROM users RETURNING id, created_at, updated_at, email, password, is_chirpy_red
 `
 
 func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
@@ -98,6 +105,7 @@ func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
 	if err != nil {
 		return nil, err
 	}
+	//
 	defer rows.Close()
 	var items []User
 	for rows.Next() {
@@ -108,6 +116,7 @@ func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Email,
 			&i.Password,
+			&i.IsChirpyRed,
 		); err != nil {
 			return nil, err
 		}
@@ -120,4 +129,50 @@ func (q *Queries) ResetUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateUser = `-- name: UpdateUser :one
+UPDATE users SET 
+email = $2,
+password = $3,
+updated_at = NOW()
+WHERE id = $1
+RETURNING id, created_at, updated_at, email, is_chirpy_red
+`
+
+type UpdateUserParams struct {
+	ID       uuid.UUID
+	Email    string
+	Password string
+}
+
+type UpdateUserRow struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Email       string
+	IsChirpyRed bool
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (UpdateUserRow, error) {
+	row := q.db.QueryRowContext(ctx, updateUser, arg.ID, arg.Email, arg.Password)
+	var i UpdateUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.IsChirpyRed,
+	)
+	return i, err
+}
+
+const upgradeUser = `-- name: UpgradeUser :one
+UPDATE users SET is_chirpy_red = true WHERE id = $1 RETURNING id
+`
+
+func (q *Queries) UpgradeUser(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, upgradeUser, id)
+	err := row.Scan(&id)
+	return id, err
 }

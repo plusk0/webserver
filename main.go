@@ -26,6 +26,7 @@ func main() {
 	apiConf.dbQueries = database.New(db)
 	apiConf.platform = os.Getenv("PLATFORM")
 	apiConf.JWTKey = os.Getenv("JWT")
+	apiConf.PolkaKey = os.Getenv("POLKA_KEY")
 
 	port := ":8080"
 
@@ -35,11 +36,15 @@ func main() {
 	mux.Handle("POST /api/chirps", http.HandlerFunc(apiConf.validateHandlerFunc))
 	mux.Handle("GET /api/chirps", http.HandlerFunc(apiConf.getChirpsHandlerFunc))
 	mux.Handle("GET /api/chirps/{chirpID}", http.HandlerFunc(apiConf.getChirpHandlerFunc))
+	mux.Handle("DELETE /api/chirps/{chirpID}", http.HandlerFunc(apiConf.deleteChirpHandlerFunc))
 
 	mux.Handle("POST /api/users", http.HandlerFunc(apiConf.usersHandlerFunc))
+	mux.Handle("PUT /api/users", http.HandlerFunc(apiConf.userUpdateHandlerFunc))
 	mux.Handle("POST /api/login", http.HandlerFunc(apiConf.loginHandlerFunc))
 	mux.Handle("POST /api/refresh", http.HandlerFunc(apiConf.refreshHandlerFunc))
-	// missing : revoke handler
+	mux.Handle("POST /api/revoke", http.HandlerFunc(apiConf.revokeHandlerFunc))
+
+	mux.Handle("POST /api/polka/webhooks", http.HandlerFunc(apiConf.webhookHandlerFunc))
 
 	mux.Handle("/app/", http.StripPrefix("/app", apiConf.middlewareMetricsInc(fileServer)))
 
