@@ -14,10 +14,9 @@ func TestMakeJWT(t *testing.T) {
 	// Setup
 	userID := uuid.New()
 	tokenSecret := "test-secret"
-	expiresIn := time.Hour
 
 	// Test valid JWT creation
-	tokenString, err := MakeJWT(userID, tokenSecret, expiresIn)
+	tokenString, err := MakeJWT(userID, tokenSecret)
 	assert.NoError(t, err, "MakeJWT should not return an error")
 	assert.NotEmpty(t, tokenString, "Token string should not be empty")
 
@@ -33,7 +32,7 @@ func TestValidateJWT(t *testing.T) {
 	expiresIn := time.Hour
 
 	// Generate a valid token
-	tokenString, err := MakeJWT(userID, tokenSecret, expiresIn)
+	tokenString, err := MakeJWT(userID, tokenSecret)
 	assert.NoError(t, err, "MakeJWT should not return an error")
 
 	// Test valid token
@@ -45,8 +44,8 @@ func TestValidateJWT(t *testing.T) {
 	_, err = ValidateJWT(tokenString, "wrong-secret")
 	assert.Error(t, err, "ValidateJWT should return an error for an invalid token")
 
-	// Test expired token
-	expiredToken, err := MakeJWT(userID, tokenSecret, -time.Hour)
+	// Test expired token - depracated
+	expiredToken, err := MakeJWT(userID, tokenSecret)
 	assert.NoError(t, err, "MakeJWT should not return an error")
 	_, err = ValidateJWT(expiredToken, tokenSecret)
 	assert.Error(t, err, "ValidateJWT should return an error for an expired token")

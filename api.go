@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/plusk0/webserver/internal/auth"
@@ -18,16 +19,28 @@ func (conf *apiConfig) usersHandlerFunc(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		respondWithError(w, 404, "Failed")
 	}
+
 	hash, err := auth.HashPassword(usr.Password)
 	if err != nil {
 		respondWithError(w, 404, "Failed")
 	}
+
 	params := database.CreateUserParams{usr.Email, hash}
 	dbUsr, err := conf.dbQueries.CreateUser(r.Context(), params)
 	if err != nil {
 		log.Fatal("Failed to create User")
 	}
-	respondWithJSON(w, 201, dbUserToSafeJSON(dbUsr))
+
+	tk, err := auth.MakeJWT(dbUsr.ID, conf.JWTKey)
+	if err != nil {
+		log.Fatal("Failed to make JWT")
+	}
+	rTK, err := auth.MakeRefreshToken()
+	if err != nil {
+		log.Fatal("Failed to make rTK")
+	}
+	user := dbUserToSafeJSON(dbUsr, tk, rTK)
+	respondWithJSON(w, 201, user)
 }
 
 func (conf *apiConfig) loginHandlerFunc(w http.ResponseWriter, r *http.Request) {
@@ -36,24 +49,55 @@ func (conf *apiConfig) loginHandlerFunc(w http.ResponseWriter, r *http.Request) 
 		respondWithError(w, 401, "invalid Username or Password")
 		return
 	}
+
 	user, err := conf.dbQueries.GetUser(r.Context(), usr.Email)
 	if err != nil {
 		respondWithError(w, 401, "invalid Username or Password")
 		return
 	}
-	valid, err := auth.CheckPasswordHash(usr.Password, user.Password)
 
+	valid, err := auth.CheckPasswordHash(usr.Password, user.Password)
 	if !valid {
 		respondWithError(w, 401, "invalid Username or Password")
 	}
 	if err != nil {
 		log.Fatalf("Failed to check Login credentials: %v", err)
 	}
-	respondWithJSON(w, 200, dbUserToSafeJSON(user))
+
+	tk, err := auth.MakeJWT(user.ID, conf.JWTKey)
+	if err != nil {
+		log.Fatal("Failed to make JWT")
+	}
+	rTK, err := auth.MakeRefreshToken()
+	if err != nil {
+		log.Fatal("Failed to make rTK")
+	}
+	params := database.CreateTokenParams{rTK, user.ID, time.Now().Add(time.Hour)}
+	conf.dbQueries.CreateToken(r.Context(), params)
+	respondWithJSON(w, 200, dbUserToSafeJSON(user, tk, rTK))
 }
 
-func dbUserToSafeJSON(db database.User) User {
-	return User{db.ID, db.CreatedAt, db.UpdatedAt, db.Email, ""}
+func (conf *apiConfig) refreshHandlerFunc(w http.ResponseWriter, r *http.Request) {
+	tk, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Fatal("Failed to get header Token")
+	}
+	dbToken, err := conf.dbQueries.GetToken(r.Context(), tk)
+	if err != nil || dbToken.RevokedAt.Valid || dbToken.Token == "" {
+		respondWithError(w, 401, "Invalid token")
+	}
+	tkNew, err := auth.MakeJWT(dbToken.UserID, conf.JWTKey)
+	if err != nil {
+		log.Fatal("Failed to make JWT")
+	}
+	tokenMap := map[string]string{
+		"token": tkNew,
+	}
+	respondWithJSON(w, 200, tokenMap)
+}
+
+func dbUserToSafeJSON(db database.User, tk string, rTK string) User {
+	return User{db.ID, db.CreatedAt, db.UpdatedAt, db.Email, "", tk, rTK}
 }
 
 func getUsrReq(r *http.Request) (usrReq, error) {
@@ -62,6 +106,7 @@ func getUsrReq(r *http.Request) (usrReq, error) {
 		return usrReq{}, fmt.Errorf("failed to read body: %v", err)
 	}
 	defer r.Body.Close()
+
 	var usr usrReq
 	err = json.Unmarshal(data, &usr)
 	if err != nil {
@@ -81,6 +126,15 @@ func healthHandlerFunc(w http.ResponseWriter, r *http.Request) {
 
 func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Request) {
 	var req chirpReq
+	tk, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		log.Fatal("Failed to get header Token")
+	}
+	validUser, err := auth.ValidateJWT(tk, conf.JWTKey)
+	if err != nil {
+		fmt.Println(err)
+	}
+	req.UserID = validUser
 
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -112,7 +166,7 @@ func (conf *apiConfig) validateHandlerFunc(w http.ResponseWriter, r *http.Reques
 	args := database.CreateChirpParams{payload, req.UserID}
 	insertedChirp, err := conf.dbQueries.CreateChirp(r.Context(), args)
 	if err != nil {
-		respondWithError(w, 400, "Failed to insert Chirp")
+		respondWithError(w, 400, "Unauthorized")
 		return
 	}
 	respondWithJSON(w, 201, dbChirpToJSON(insertedChirp))

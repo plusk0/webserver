@@ -25,6 +25,7 @@ func main() {
 	}
 	apiConf.dbQueries = database.New(db)
 	apiConf.platform = os.Getenv("PLATFORM")
+	apiConf.JWTKey = os.Getenv("JWT")
 
 	port := ":8080"
 
@@ -37,6 +38,8 @@ func main() {
 
 	mux.Handle("POST /api/users", http.HandlerFunc(apiConf.usersHandlerFunc))
 	mux.Handle("POST /api/login", http.HandlerFunc(apiConf.loginHandlerFunc))
+	mux.Handle("POST /api/refresh", http.HandlerFunc(apiConf.refreshHandlerFunc))
+	// missing : revoke handler
 
 	mux.Handle("/app/", http.StripPrefix("/app", apiConf.middlewareMetricsInc(fileServer)))
 

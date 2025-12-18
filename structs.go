@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"sync/atomic"
 	"time"
 
@@ -12,6 +13,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
 	platform       string
+	JWTKey         string
 }
 
 type Chirp struct {
@@ -30,12 +32,24 @@ type chirpReq struct {
 type usrReq struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Expiry   int    `json:"expires_in_seconds"`
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	password  string
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	password     string
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type RefreshToken struct {
+	Token     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    uuid.UUID
+	ExpiresAt time.Time
+	RevokedAt sql.NullTime
 }

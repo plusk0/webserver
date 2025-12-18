@@ -32,7 +32,7 @@ func (cfg *apiConfig) metricsResetHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		log.Fatal("Failed to reset users")
 	}
-	fmt.Println("resetting")
+	fmt.Println("resetting users")
 	w.WriteHeader(200)
 }
 
